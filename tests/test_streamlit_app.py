@@ -90,7 +90,7 @@ CHECKBOXES = [
     "Convert PNG images to JPG",
     "Compress PDF figures (Ghostscript)",
     "Generate a missing .bbl with BibTeX",
-    "Remove .tex files your paper doesn't use",
+    "Remove other documents your paper doesn't use",
     "Keep .bib files",
     "Use Inkscape-exported SVGs (\\includesvg)",
 ]
@@ -123,7 +123,7 @@ def test_defaults():
     assert at.slider[0].value == 50
     assert [c.label for c in at.checkbox if c.value] == [
         "Generate a missing .bbl with BibTeX",
-        "Remove .tex files your paper doesn't use",
+        "Remove other documents your paper doesn't use",
         "Keep .bib files",
     ]
 
@@ -336,7 +336,7 @@ def test_results_dashboard_when_ready(upload):
 def test_removed_unused_tex_files_are_listed(upload, count, shown):
     upload(make_zip({"main.tex": doc(), **{f"draft{i}.tex": doc("old") for i in range(count)}}))
     at = click_clean(run_app())
-    message = next(i.value for i in at.info if "Removed .tex files" in i.value)
+    message = next(i.value for i in at.info if "Removed other documents" in i.value)
     assert shown in message and "untick" in message
 
 

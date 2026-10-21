@@ -53,8 +53,9 @@ deleted right away.
   a crash.
 
 **Generates the missing bibliography**
-- arXiv does not run BibTeX, and Overleaf's source download has no `.bbl`, so
-  citations would show as "?".
+- arXiv builds references from the `.bbl`, and Overleaf's source download has
+  none. arXiv only runs BibTeX itself when the `.bib` files are uploaded too,
+  so without a `.bbl` citations can show as "?".
 - When your paper uses a `.bib` but the zip has no `.bbl`, the app runs BibTeX
   with your own `.bib` and `.bst` and adds `main.bbl`.
 - Citations are read from the *cleaned* sources, so references that only
@@ -93,15 +94,18 @@ deleted right away.
   `arxiv_latex_cleaner` produces from the same folder, and a test enforces this.
 
 **Fixes on top of `arxiv_latex_cleaner`**
-- **Definitions of deleted commands:** deleting or unwrapping a command
-  defined without braces, like `\newcommand\rs[1]{…}`, used to leave a broken
-  `\newcommand%` that stops LaTeX. Only the uses are now deleted or unwrapped,
-  and the definition line is removed once nothing uses it. Every other
-  `\newcommand` is left as it is.
-- **Unused `.tex` files:** files next to the main file that the paper neither
-  loads nor mentions are removed, e.g. the ACL template's `acl_lualatex.tex`
-  or an old draft. arXiv could otherwise pick the wrong file to compile.
-- **`.bib` files are kept**, so arXiv can also rebuild the bibliography.
+- **Definitions of deleted commands:** `arxiv_latex_cleaner` mistakes some
+  definitions for uses: deleting `\rs` turned `\newcommand\rs[1]{…}` or
+  `\def\rs{…}` into a broken `\newcommand%` or `\def%` that stops LaTeX, and
+  unwrapping `\hl` turned `\newcommand\hl[1]{\colorbox{yellow}{#1}}` into a
+  redefinition of `\colorbox`. Now only the uses are deleted or unwrapped, and
+  the definition line is removed once nothing uses the command (otherwise it
+  stays as written). Definitions of other commands are never touched.
+- **Unused documents:** other complete LaTeX documents that the paper neither
+  loads nor mentions are removed, e.g. the ACL template's `acl_lualatex.tex` or
+  an old copy of the paper. arXiv could otherwise compile one of them instead.
+- **`.bib` files are kept.** arXiv uses the `.bbl` and only runs BibTeX itself
+  if that is missing.
 
 ## Cleaning options
 
@@ -112,17 +116,20 @@ with the tool's own defaults except that `.bib` files are kept:
 |---|---|
 | ✂️ Remove content | commands to delete (`todo`), commands to unwrap and keep their text (`hl`), environments to delete (`note`), `\if…` commands that aren't conditionals |
 | 🖼️ Images | resize (max size), PNG → JPG (quality, size threshold), compress PDFs with Ghostscript (dpi), per-image size allowlist (JSON) |
-| 🧩 Other | generate a missing `.bbl` with BibTeX (on by default), remove `.tex` files your paper doesn't use (on by default), keep `.bib` files (on by default), externalized TikZ folder, Inkscape SVGs (`\includesvg`), a `cleaner_config.yaml` upload (e.g. `patterns_and_insertions`) |
+| 🧩 Other | generate a missing `.bbl` with BibTeX (on by default), remove other documents your paper doesn't use (on by default), keep `.bib` files (on by default), externalized TikZ folder, Inkscape SVGs (`\includesvg`), a `cleaner_config.yaml` upload (e.g. `patterns_and_insertions`) |
 
 Some notes on these options:
 - **Commands to delete or unwrap:** list the commands themselves (`rs`, not
   `\newcommand\rs`). Their uses are deleted or unwrapped, and their own
   definitions are removed once nothing uses them; if something still does
-  (e.g. `\let\note\rs`), the definition stays so the paper compiles.
-- **Unused `.tex` files:** a file is kept if the paper loads it (`\input`,
-  `\include`, `\subfile`, `\import`) or mentions its name anywhere, e.g. in
-  `\input{\dir/table}` or `\lstinputlisting{code.tex}`. Untick the option to
-  keep every file.
+  (e.g. `\let\note\rs`, or a macro in your `.sty`), the definition stays so the
+  paper compiles.
+- **Unused documents:** only complete documents (`\documentclass` and
+  `\begin{document}`) are removed, and only if no kept file loads or names
+  them (e.g. `\includestandalone{plot}`) and no `00README` lists them. Other
+  `.tex` files are always kept. Untick the option to keep every file.
+- **`.bib` files** from a reference manager can contain private notes or local
+  file paths (`file = {/Users/…}`); untick **Keep .bib files** to leave them out.
 - **Paths:** folders and image paths are relative to the folder of your main
   `.tex`.
 - **Validation:** invalid names, JSON or config files are reported before
@@ -183,7 +190,7 @@ arXiv compiles from the folder that holds the main `.tex`. Here is what
 
 | File | What happens |
 |---|---|
-| `.tex` next to the main file | always kept, and cleaned (the app then removes the ones your paper doesn't use) |
+| `.tex` next to the main file | always kept, and cleaned (the app then removes other complete documents your paper doesn't use) |
 | `.tex` in subfolders | kept only if `\input`/`\include`d, and cleaned |
 | `.png` `.jpg` `.jpeg` `.pdf` figures | kept only if a kept `.tex` uses them |
 | other files next to the main file (`.sty`, `.cls`, `.bst`, `.bbl`, …) | kept as they are |

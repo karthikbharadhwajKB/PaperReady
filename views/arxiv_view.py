@@ -100,21 +100,23 @@ def cleaning_options():
             make_bbl = st.checkbox(
                 "Generate a missing .bbl with BibTeX",
                 value=True,
-                help="arXiv needs the compiled bibliography (.bbl) and does not run BibTeX. "
+                help="arXiv builds your references from the compiled bibliography (.bbl). "
                 "If your zip has none, BibTeX builds it from your .bib and .bst files.",
             )
             remove_unused_tex = st.checkbox(
-                "Remove .tex files your paper doesn't use",
+                "Remove other documents your paper doesn't use",
                 value=True,
-                help="Other documents next to your main file, such as the ACL template's "
-                "acl_lualatex.tex or an old draft, are not part of your paper, and arXiv "
-                "may even pick the wrong one to compile. A file your paper loads or "
-                "mentions by name is always kept.",
+                help="Other complete LaTeX documents in your zip, such as the ACL template's "
+                "acl_lualatex.tex or an old copy of the paper, are removed unless your paper "
+                "loads or names them: arXiv could compile one of them instead of your paper. "
+                "Other .tex files are always kept.",
             )
             keep_bib = st.checkbox(
                 "Keep .bib files",
                 value=True,
-                help="arXiv uses the .bbl; with the .bib it can also rebuild the bibliography.",
+                help="arXiv uses the .bbl and only runs BibTeX itself if that is missing. "
+                "Untick if your .bib holds private notes or local file paths "
+                "(e.g. file = {/Users/…} from a reference manager).",
             )
             external_tikz = st.text_input(
                 "Folder with externalized TikZ PDFs (optional)",
@@ -215,9 +217,10 @@ def show_results(result, upload_name, celebrate=True):
         names = ", ".join(f"`{name}`" for name in result.removed_unused_tex[:10])
         more = len(result.removed_unused_tex) - 10
         st.info(
-            f"🗑️ Removed .tex files your paper doesn't use: {names}"
+            f"🗑️ Removed other documents your paper doesn't use: {names}"
             + (f" and {more} more" if more > 0 else "")
-            + ". To keep them, untick “Remove .tex files your paper doesn't use” in the cleaning options."
+            + ". arXiv could otherwise compile one of them instead of your paper. To keep them, "
+            "untick “Remove other documents your paper doesn't use” in the cleaning options."
         )
 
     size_in = sum(result.input_files.values())

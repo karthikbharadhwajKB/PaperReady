@@ -796,11 +796,12 @@ def test_output_is_exactly_what_arxiv_latex_cleaner_produces(tmp_path, extra_arg
         assert unzip(cleaned.zip_bytes) == expected
 
 
-def test_unused_root_tex_is_the_only_other_difference():
-    # notes.tex is next to the main file but the paper never loads it.
-    result = clean_zip(make_zip(UPSTREAM_PROJECT))
-    assert result.removed_unused_tex == ["notes.tex"]
-    assert "notes.tex" not in unzip(result.zip_bytes)
+def test_an_unused_document_is_the_only_other_difference():
+    # notes.tex (a fragment) is kept like upstream does; old.tex is a whole other document.
+    plain = unzip(clean_zip(make_zip(UPSTREAM_PROJECT), remove_unused_tex=False).zip_bytes)
+    result = clean_zip(make_zip({**UPSTREAM_PROJECT, "old.tex": doc("An old copy")}))
+    assert result.removed_unused_tex == ["old.tex"]
+    assert unzip(result.zip_bytes) == plain
 
 
 # --- Definitions of deleted commands -------------------------------------------------
@@ -858,7 +859,7 @@ def test_definition_stays_while_the_command_is_still_used():
         {"main.tex": doc("A\\rs{gone}B\\note{kept}", "\\newcommand\\rs[1]{[#1]}\n\\let\\note\\rs")},
         commands_to_delete="rs",
     )
-    assert "\\newcommand{\\rs}[1]{[#1]}" in main and "gone" not in main and "\\let\\note\\rs" in main
+    assert "\\newcommand\\rs[1]{[#1]}" in main and "gone" not in main and "\\let\\note\\rs" in main
 
 
 def test_commands_with_a_longer_name_are_untouched():
@@ -872,6 +873,54 @@ def test_definitions_are_untouched_without_commands_to_delete():
     assert "\\newcommand\\rs[1]{\\textbf{\\textcolor{red}{RS: #1}}}" in cleaned_main(files)
 
 
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "\\long\\def\\rs#1{\\textbf{#1}}",
+        "\\protected\\long\\def\\rs#1{\\textbf{#1}}",
+        "\\global\\def\\rs#1{\\textbf{#1}}",
+        "\\def\\rs{\\textcolor{red}}",  # no parameters: upstream turned it into "\def%"
+    ],
+)
+def test_def_with_prefixes_or_no_parameters_is_removed_whole(definition):
+    main = cleaned_main(
+        {"main.tex": doc("A\\rs{note}B", f"{definition}\n\\newcommand{{\\foo}}{{x}}")},
+        commands_to_delete="rs",
+    )
+    assert (
+        "\\rs" not in main and "\\long" not in main and "\\protected" not in main and "\\global" not in main
+    )
+    assert "\\def%" not in main and "\\newcommand{\\foo}{x}" in main
+
+
+def test_a_definition_inside_another_one_goes_with_it():
+    main = cleaned_main(
+        {
+            "main.tex": doc(
+                "x\\rs{a}", "\\newcommand{\\rs}[1]{#1\\renewcommand{\\rs}[1]{}} \\newcommand{\\keepme}{KEEP}"
+            )
+        },
+        commands_to_delete="rs",
+    )
+    assert "\\newcommand{\\keepme}{KEEP}" in main and "\\rs" not in main
+
+
+def test_use_in_a_style_file_keeps_the_definition():
+    files = {
+        "main.tex": doc("A\\rs{x}B\\note{y}", "\\usepackage{mine}\n\\newcommand{\\rs}[1]{[#1]}"),
+        "mine.sty": "\\newcommand{\\note}[1]{\\rs{#1}}",
+    }
+    assert "\\newcommand{\\rs}[1]{[#1]}" in cleaned_main(files, commands_to_delete="rs")
+
+
+def test_kept_definitions_are_restored_exactly():
+    # \rs stays used (by \let), so its definition must come back byte for byte.
+    preamble = "\\newcommand\\rs[1]{\\textbf{\\textcolor{red}{RS: #1}}}\n\\let\\note\\rs"
+    main = cleaned_main({"main.tex": doc("\\note{x}", preamble)}, commands_only_to_delete="rs")
+    assert "\\newcommand\\rs[1]{\\textbf{\\textcolor{red}{RS: #1}}}" in main
+    assert "PaperReady" not in main
+
+
 def test_unbalanced_definition_is_left_alone():
     main = cleaned_main({"main.tex": doc("A\\rs{x}B", "\\def\\rs#1{\\textbf{#1}")}, commands_to_delete="rs")
     assert "\\begin{document}" in main
@@ -880,18 +929,20 @@ def test_unbalanced_definition_is_left_alone():
 # --- .tex files the paper doesn't use ----------------------------------------------
 
 
-def test_unused_tex_files_are_removed():
+def test_unused_documents_are_removed_and_fragments_kept():
     files = {
         "acl_latex.tex": doc("\\input{sections/intro}\\input{table}"),
-        "acl_lualatex.tex": doc("Other document"),
-        "old_draft.tex": "draft",
+        "acl_lualatex.tex": doc("Other document"),  # the ACL template's second main file
+        "old_copy.tex": doc("An old copy of the paper"),
+        "old_section.tex": "a fragment nobody loads",
         "table.tex": "table",
         "sections/intro.tex": "intro",
     }
     result = clean_zip(make_zip(files), main_hint="acl_latex.tex")
-    assert sorted(result.removed_unused_tex) == ["acl_lualatex.tex", "old_draft.tex"]
+    assert sorted(result.removed_unused_tex) == ["acl_lualatex.tex", "old_copy.tex"]
     assert sorted(n for n in unzip(result.zip_bytes) if n.endswith(".tex")) == [
         "acl_latex.tex",
+        "old_section.tex",
         "sections/intro.tex",
         "table.tex",
     ]
@@ -905,10 +956,41 @@ def test_unused_tex_files_are_removed():
         "\\includestandalone{results}",  # a standalone figure
     ],
 )
-def test_tex_files_the_paper_mentions_are_kept(body):
-    files = {"main.tex": doc(body), "results.tex": "results", "tables/results.tex": "results"}
+def test_documents_the_paper_names_are_kept(body):
+    files = {"main.tex": doc(body), "results.tex": doc("standalone"), "tables/results.tex": doc("table")}
     result = clean_zip(make_zip(files))
     assert result.removed_unused_tex == []
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        # A standalone figure that loads its data from another document.
+        {
+            "main.tex": doc("\\includestandalone{plot}"),
+            "plot.tex": doc("\\input{plot_data}"),
+            "plot_data.tex": doc("d"),
+        },
+        # Files whose names are built while LaTeX runs.
+        {"main.tex": doc("\\foreach \\i in {1,2}{\\input{sec\\i}}"), "sec1.tex": "one", "sec2.tex": "two"},
+        {
+            "main.tex": doc("\\newcommand{\\sec}[1]{\\input{#1}}\\sec{intro}"),
+            "intro.tex": "\\input{intro_table}",
+            "intro_table.tex": "t",
+        },
+    ],
+)
+def test_files_loaded_in_ways_that_cannot_be_followed_are_kept(files):
+    assert clean_zip(make_zip(files)).removed_unused_tex == []
+
+
+def test_documents_listed_in_00readme_are_kept():
+    files = {
+        "main.tex": doc(),
+        "appendix.tex": doc("Appendix"),
+        "00README.json": '{"sources": [{"filename": "appendix.tex"}]}',
+    }
+    assert clean_zip(make_zip(files)).removed_unused_tex == []
 
 
 def test_unused_tex_files_can_be_kept():
