@@ -921,6 +921,18 @@ def test_kept_definitions_are_restored_exactly():
     assert "PaperReady" not in main
 
 
+def test_protected_edef_is_removed_whole():
+    preamble = "\\makeatletter\\protected@edef\\rs{\\textbf}\\makeatother\n\\newcommand{\\foo}{x}"
+    main = cleaned_main({"main.tex": doc("A\\rs{note}B", preamble)}, commands_to_delete="rs")
+    assert "\\rs" not in main and "\\makeatother" in main and "\\newcommand{\\foo}{x}" in main
+
+
+def test_a_macro_named_like_the_placeholder_is_left_alone():
+    preamble = "\\newcommand{\\PaperReadyKeeprs}{mine}\n\\newcommand{\\rs}[1]{[#1]}"
+    main = cleaned_main({"main.tex": doc("\\PaperReadyKeeprs A\\rs{x}B", preamble)}, commands_to_delete="rs")
+    assert "\\newcommand{\\PaperReadyKeeprs}{mine}" in main and "\\PaperReadyKeeprs A" in main
+
+
 def test_unbalanced_definition_is_left_alone():
     main = cleaned_main({"main.tex": doc("A\\rs{x}B", "\\def\\rs#1{\\textbf{#1}")}, commands_to_delete="rs")
     assert "\\begin{document}" in main

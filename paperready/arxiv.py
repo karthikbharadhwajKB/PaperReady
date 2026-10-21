@@ -1092,7 +1092,7 @@ def _definition_head(command):
     name = rf"\\{command}(?![A-Za-z@])"
     return re.compile(
         rf"(?P<definer>\\(?P<kind>{_DEFINERS})\*?\s*(?P<brace>\{{)?\s*){name}"
-        rf"|(?P<def>{_DEF_PREFIXES}\\[gex]?def\s*){name}"
+        rf"|(?P<def>{_DEF_PREFIXES}\\(?:protected@)?[gex]?def\s*){name}"
     )
 
 
@@ -1102,11 +1102,12 @@ def _files(root, suffixes):
 
 def _hide_definitions(root, commands):
     """Renames the definitions of `commands` in the files the cleaner edits to
-    their placeholder names, so the cleaner only deletes or unwraps the uses."""
-    for path in _files(root, _CLEANED_SUFFIXES):
-        text = _read_utf8(path)
-        if text is None:
-            continue
+    their placeholder names, so the cleaner only deletes or unwraps the uses.
+    Returns the commands it renamed: one whose placeholder name already occurs
+    in the paper is left alone."""
+    files = {p: t for p in _files(root, _CLEANED_SUFFIXES) if (t := _read_utf8(p)) is not None}
+    commands = [c for c in commands if not any(_placeholder(c) in t for t in files.values())]
+    for path, text in files.items():
         hidden = text
         for command in commands:
             rename = f"\\{_placeholder(command)}"
@@ -1115,6 +1116,7 @@ def _hide_definitions(root, commands):
             )
         if hidden != text:
             path.write_bytes(hidden.encode("utf-8"))
+    return commands
 
 
 def _definition_spans(text, command):
@@ -1309,8 +1311,7 @@ def clean_zip(
                         f"{main_tex.name}, so that option had no effect."
                     )
 
-        deleted = _deleted_commands(extra_args, config)
-        _hide_definitions(staged, deleted)
+        deleted = _hide_definitions(staged, _deleted_commands(extra_args, config))
 
         cmd = [sys.executable, "-m", "arxiv_latex_cleaner", str(staged), *extra_args]
         if config is not None:
