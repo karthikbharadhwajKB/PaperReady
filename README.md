@@ -87,22 +87,42 @@ deleted right away.
 - **A file list:** every kept and removed file, with its size.
 
 **Stays faithful to `arxiv_latex_cleaner`**
-- The app only prepares the input and adds `main.bbl` when it's missing.
-- The cleaned files are byte-for-byte what `arxiv_latex_cleaner` produces
-  from the same folder, and a test enforces this.
+- The app prepares the input, adds `main.bbl` when it's missing, and makes
+  three targeted fixes (below).
+- Apart from those, the cleaned files are byte-for-byte what
+  `arxiv_latex_cleaner` produces from the same folder, and a test enforces this.
+
+**Fixes on top of `arxiv_latex_cleaner`**
+- **Definitions of deleted commands:** deleting or unwrapping a command
+  defined without braces, like `\newcommand\rs[1]{…}`, used to leave a broken
+  `\newcommand%` that stops LaTeX. Only the uses are now deleted or unwrapped,
+  and the definition line is removed once nothing uses it. Every other
+  `\newcommand` is left as it is.
+- **Unused `.tex` files:** files next to the main file that the paper neither
+  loads nor mentions are removed, e.g. the ACL template's `acl_lualatex.tex`
+  or an old draft. arXiv could otherwise pick the wrong file to compile.
+- **`.bib` files are kept**, so arXiv can also rebuild the bibliography.
 
 ## Cleaning options
 
 Every `arxiv_latex_cleaner` option is available under **⚙️ Cleaning options**,
-with the tool's own defaults:
+with the tool's own defaults except that `.bib` files are kept:
 
 | Tab | Options |
 |---|---|
 | ✂️ Remove content | commands to delete (`todo`), commands to unwrap and keep their text (`hl`), environments to delete (`note`), `\if…` commands that aren't conditionals |
 | 🖼️ Images | resize (max size), PNG → JPG (quality, size threshold), compress PDFs with Ghostscript (dpi), per-image size allowlist (JSON) |
-| 🧩 Other | generate a missing `.bbl` with BibTeX (on by default), keep `.bib` files, externalized TikZ folder, Inkscape SVGs (`\includesvg`), a `cleaner_config.yaml` upload (e.g. `patterns_and_insertions`) |
+| 🧩 Other | generate a missing `.bbl` with BibTeX (on by default), remove `.tex` files your paper doesn't use (on by default), keep `.bib` files (on by default), externalized TikZ folder, Inkscape SVGs (`\includesvg`), a `cleaner_config.yaml` upload (e.g. `patterns_and_insertions`) |
 
 Some notes on these options:
+- **Commands to delete or unwrap:** list the commands themselves (`rs`, not
+  `\newcommand\rs`). Their uses are deleted or unwrapped, and their own
+  definitions are removed once nothing uses them; if something still does
+  (e.g. `\let\note\rs`), the definition stays so the paper compiles.
+- **Unused `.tex` files:** a file is kept if the paper loads it (`\input`,
+  `\include`, `\subfile`, `\import`) or mentions its name anywhere, e.g. in
+  `\input{\dir/table}` or `\lstinputlisting{code.tex}`. Untick the option to
+  keep every file.
 - **Paths:** folders and image paths are relative to the folder of your main
   `.tex`.
 - **Validation:** invalid names, JSON or config files are reported before
@@ -163,12 +183,12 @@ arXiv compiles from the folder that holds the main `.tex`. Here is what
 
 | File | What happens |
 |---|---|
-| `.tex` next to the main file | always kept, and cleaned |
+| `.tex` next to the main file | always kept, and cleaned (the app then removes the ones your paper doesn't use) |
 | `.tex` in subfolders | kept only if `\input`/`\include`d, and cleaned |
 | `.png` `.jpg` `.jpeg` `.pdf` figures | kept only if a kept `.tex` uses them |
 | other files next to the main file (`.sty`, `.cls`, `.bst`, `.bbl`, …) | kept as they are |
 | other files in subfolders (`.eps`, `.sty`, …) | kept only if referenced **with** their extension |
-| `.aux`, `.log`, `.synctex.gz`, `.svg`, `.ps`, `.bib`, … | removed (`.bib` stays with **Keep .bib files**) |
+| `.aux`, `.log`, `.synctex.gz`, `.svg`, `.ps`, `.bib`, … | removed (`.bib` stays with **Keep .bib files**, on by default) |
 
 For a paper that builds on arXiv, keep custom `.sty`/`.cls`/`.bst` files next
 to the main file, and write the extension for `.eps` figures. The app warns you

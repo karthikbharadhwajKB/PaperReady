@@ -35,11 +35,13 @@ def main_file_input():
 
 
 def cleaning_options():
-    """The “Cleaning options” expander. Returns (CleanerOptions, make_bbl, config_bytes)."""
+    """The “Cleaning options” expander. Returns (CleanerOptions, make_bbl,
+    remove_unused_tex, config_bytes)."""
     with st.expander("⚙️ Cleaning options"):
         st.caption(
-            "All options are passed to arxiv_latex_cleaner; defaults match its own. "
-            "Folders and image paths are relative to the main file's folder."
+            "All options are passed to arxiv_latex_cleaner; defaults match its own, "
+            "except that .bib files are kept. Folders and image paths are relative to "
+            "the main file's folder."
         )
         content_tab, images_tab, other_tab = st.tabs(["✂️ Remove content", "🖼️ Images", "🧩 Other"])
 
@@ -101,7 +103,19 @@ def cleaning_options():
                 help="arXiv needs the compiled bibliography (.bbl) and does not run BibTeX. "
                 "If your zip has none, BibTeX builds it from your .bib and .bst files.",
             )
-            keep_bib = st.checkbox("Keep .bib files")
+            remove_unused_tex = st.checkbox(
+                "Remove .tex files your paper doesn't use",
+                value=True,
+                help="Other documents next to your main file, such as the ACL template's "
+                "acl_lualatex.tex or an old draft, are not part of your paper, and arXiv "
+                "may even pick the wrong one to compile. A file your paper loads or "
+                "mentions by name is always kept.",
+            )
+            keep_bib = st.checkbox(
+                "Keep .bib files",
+                value=True,
+                help="arXiv uses the .bbl; with the .bib it can also rebuild the bibliography.",
+            )
             external_tikz = st.text_input(
                 "Folder with externalized TikZ PDFs (optional)",
                 help="Replaces \\tikzsetnextfilename{x} + tikzpicture with \\includegraphics{folder/x.pdf}.",
@@ -136,10 +150,10 @@ def cleaning_options():
         svg_inkscape_path=svg_path,
     )
     config = config_file.getvalue() if config_file is not None else None
-    return options, make_bbl, config
+    return options, make_bbl, remove_unused_tex, config
 
 
-def clean(zip_bytes, main_hint, options, make_bbl, config):
+def clean(zip_bytes, main_hint, options, make_bbl, remove_unused_tex, config):
     """Runs the cleaner with a live status; shows errors and stops on failure."""
     started = time.monotonic()
     status = st.status("Cleaning your paper…", expanded=True)
@@ -150,7 +164,7 @@ def clean(zip_bytes, main_hint, options, make_bbl, config):
             for note in notes:
                 st.warning(note)
             st.write("🧹 Running arxiv_latex_cleaner…")
-            result = arxiv.clean_zip(zip_bytes, extra, main_hint, config, make_bbl)
+            result = arxiv.clean_zip(zip_bytes, extra, main_hint, config, make_bbl, remove_unused_tex)
             st.write("🔎 Checking the result for arXiv…")
             status.update(
                 label=f"Cleaned in {time.monotonic() - started:.1f} s",
@@ -196,6 +210,14 @@ def show_results(result, upload_name, celebrate=True):
         st.info(
             f"📚 Generated `{result.generated_bbl}` with BibTeX from your .bib and "
             "bibliography style, so your references will appear on arXiv."
+        )
+    if result.removed_unused_tex:
+        names = ", ".join(f"`{name}`" for name in result.removed_unused_tex[:10])
+        more = len(result.removed_unused_tex) - 10
+        st.info(
+            f"🗑️ Removed .tex files your paper doesn't use: {names}"
+            + (f" and {more} more" if more > 0 else "")
+            + ". To keep them, untick “Remove .tex files your paper doesn't use” in the cleaning options."
         )
 
     size_in = sum(result.input_files.values())
@@ -270,7 +292,7 @@ def show_results(result, upload_name, celebrate=True):
 def render():
     uploaded = st.file_uploader("Upload your LaTeX project (.zip)", type=["zip"])
     main_hint = main_file_input()
-    options, make_bbl, config = cleaning_options()
+    options, make_bbl, remove_unused_tex, config = cleaning_options()
 
     if uploaded is None:
         st.info("👆 Drop your project's .zip above to get started.")
@@ -278,5 +300,5 @@ def render():
     if not st.button("Clean my paper", type="primary", icon="🧹", width="stretch"):
         st.stop()
 
-    result = clean(uploaded.getvalue(), main_hint, options, make_bbl, config)
+    result = clean(uploaded.getvalue(), main_hint, options, make_bbl, remove_unused_tex, config)
     show_results(result, uploaded.name)

@@ -792,7 +792,129 @@ def test_output_is_exactly_what_arxiv_latex_cleaner_produces(tmp_path, extra_arg
 
     for layout in ("", "nested/folder/"):
         files = {layout + name: data for name, data in UPSTREAM_PROJECT.items()}
-        assert unzip(clean_zip(make_zip(files), extra_args).zip_bytes) == expected
+        cleaned = clean_zip(make_zip(files), extra_args, remove_unused_tex=False)
+        assert unzip(cleaned.zip_bytes) == expected
+
+
+def test_unused_root_tex_is_the_only_other_difference():
+    # notes.tex is next to the main file but the paper never loads it.
+    result = clean_zip(make_zip(UPSTREAM_PROJECT))
+    assert result.removed_unused_tex == ["notes.tex"]
+    assert "notes.tex" not in unzip(result.zip_bytes)
+
+
+# --- Definitions of deleted commands -------------------------------------------------
+
+# The preamble of a real paper (LREC 2026) with reviewer-comment macros, and the
+# app's own options for deleting or unwrapping them.
+REVIEW_MACROS = (
+    "\\newcommand{\\sweetval}[1]{\\cellcolor{sweetlora}\\textbf{#1}}\n"
+    "\\newcommand\\rs[1]{\\textbf{\\textcolor{red}{RS: #1}}}\n"
+    "\\newcommand{\\italcaps}[1]{\\textsc{#1}}\n"
+    "\\newcommand\\kk[1]{\\textbf{\\textcolor{blue}{kk: #1}}}\n"
+)
+
+
+def cleaned_main(files, **options):
+    extra, _ = build_cleaner_args(CleanerOptions(**options))
+    return unzip(clean_zip(make_zip(files), extra).zip_bytes)["main.tex"].decode()
+
+
+@pytest.mark.parametrize("option", ["commands_to_delete", "commands_only_to_delete"])
+def test_definitions_of_deleted_commands_are_removed_whole(option):
+    main = cleaned_main(
+        {"main.tex": doc("A\\rs{check this} B \\kk{and this}", REVIEW_MACROS)}, **{option: "rs kk"}
+    )
+    assert "\\rs" not in main and "\\kk" not in main and "\\newcommand%" not in main
+    # Every other definition is untouched.
+    assert "\\newcommand{\\sweetval}[1]{\\cellcolor{sweetlora}\\textbf{#1}}" in main
+    assert "\\newcommand{\\italcaps}[1]{\\textsc{#1}}" in main
+    if option == "commands_only_to_delete":
+        assert "check this" in main and "and this" in main
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "\\newcommand\\rs[1]{\\textbf{#1}}",
+        "\\newcommand*\\rs[1]{\\textbf{#1}}",
+        "\\newcommand{\\rs}[1]{\\textbf{#1}}",
+        "\\renewcommand\\rs[1]{\\textbf{#1}}",
+        "\\providecommand\\rs[1][x]{\\textbf{#1}}",
+        "\\DeclareRobustCommand\\rs[1]{\\textbf{\\textcolor{red}{#1}}}",
+        "\\NewDocumentCommand\\rs{m}{\\textbf{#1}}",
+        "\\def\\rs#1{\\textbf{#1}}",
+    ],
+)
+def test_every_way_of_defining_a_deleted_command(definition):
+    main = cleaned_main({"main.tex": doc("A\\rs{note}B", definition)}, commands_to_delete="rs")
+    assert "\\rs" not in main and "note" not in main and "AB" in main
+
+
+def test_definition_stays_while_the_command_is_still_used():
+    # \let copies \rs without braces, which the cleaner cannot delete: removing the
+    # definition would leave \note undefined, so it stays (and still compiles).
+    main = cleaned_main(
+        {"main.tex": doc("A\\rs{gone}B\\note{kept}", "\\newcommand\\rs[1]{[#1]}\n\\let\\note\\rs")},
+        commands_to_delete="rs",
+    )
+    assert "\\newcommand{\\rs}[1]{[#1]}" in main and "gone" not in main and "\\let\\note\\rs" in main
+
+
+def test_commands_with_a_longer_name_are_untouched():
+    preamble = "\\newcommand\\rs[1]{#1}\\newcommand\\rsx[1]{#1}\\newcommand{\\rsquo}{'}"
+    main = cleaned_main({"main.tex": doc("\\rs{a}\\rsx{b}\\rsquo", preamble)}, commands_to_delete="rs")
+    assert "\\newcommand\\rsx[1]{#1}" in main and "\\newcommand{\\rsquo}{'}" in main and "\\rsx{b}" in main
+
+
+def test_definitions_are_untouched_without_commands_to_delete():
+    files = {"main.tex": doc("A\\rs{note}B", REVIEW_MACROS)}
+    assert "\\newcommand\\rs[1]{\\textbf{\\textcolor{red}{RS: #1}}}" in cleaned_main(files)
+
+
+def test_unbalanced_definition_is_left_alone():
+    main = cleaned_main({"main.tex": doc("A\\rs{x}B", "\\def\\rs#1{\\textbf{#1}")}, commands_to_delete="rs")
+    assert "\\begin{document}" in main
+
+
+# --- .tex files the paper doesn't use ----------------------------------------------
+
+
+def test_unused_tex_files_are_removed():
+    files = {
+        "acl_latex.tex": doc("\\input{sections/intro}\\input{table}"),
+        "acl_lualatex.tex": doc("Other document"),
+        "old_draft.tex": "draft",
+        "table.tex": "table",
+        "sections/intro.tex": "intro",
+    }
+    result = clean_zip(make_zip(files), main_hint="acl_latex.tex")
+    assert sorted(result.removed_unused_tex) == ["acl_lualatex.tex", "old_draft.tex"]
+    assert sorted(n for n in unzip(result.zip_bytes) if n.endswith(".tex")) == [
+        "acl_latex.tex",
+        "sections/intro.tex",
+        "table.tex",
+    ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "\\newcommand{\\tabledir}{tables}\\input{\\tabledir/results}",  # loaded through a macro
+        "\\lstinputlisting{results.tex}",  # shown as a listing
+        "\\includestandalone{results}",  # a standalone figure
+    ],
+)
+def test_tex_files_the_paper_mentions_are_kept(body):
+    files = {"main.tex": doc(body), "results.tex": "results", "tables/results.tex": "results"}
+    result = clean_zip(make_zip(files))
+    assert result.removed_unused_tex == []
+
+
+def test_unused_tex_files_can_be_kept():
+    files = {"main.tex": doc(), "other.tex": doc("Other")}
+    result = clean_zip(make_zip(files), remove_unused_tex=False)
+    assert result.removed_unused_tex == [] and "other.tex" in unzip(result.zip_bytes)
 
 
 # --- Cleaner options --------------------------------------------------------------
@@ -816,8 +938,9 @@ def image_size(data):
 
 
 class TestBuildCleanerArgs:
-    def test_defaults_add_nothing(self):
-        assert build_cleaner_args(CleanerOptions()) == ([], [])
+    def test_defaults_only_keep_bib_files(self):
+        assert build_cleaner_args(CleanerOptions()) == (["--keep_bib"], [])
+        assert build_cleaner_args(CleanerOptions(keep_bib=False)) == ([], [])
 
     def test_every_option(self):
         args, notes = build_cleaner_args(
@@ -872,15 +995,18 @@ class TestBuildCleanerArgs:
         ]
 
     def test_dependent_values_ignored_when_off(self):
-        options = CleanerOptions(im_size=9, pdf_im_resolution=9, png_quality=9, svg_inkscape_path="x")
+        options = CleanerOptions(
+            keep_bib=False, im_size=9, pdf_im_resolution=9, png_quality=9, svg_inkscape_path="x"
+        )
         assert build_cleaner_args(options) == ([], [])
 
     def test_svg_inkscape_default_folder(self):
-        assert build_cleaner_args(CleanerOptions(svg_inkscape=True))[0] == ["--svg_inkscape"]
+        assert build_cleaner_args(CleanerOptions(keep_bib=False, svg_inkscape=True))[0] == ["--svg_inkscape"]
 
     def test_invalid_names_become_notes(self):
         args, notes = build_cleaner_args(
             CleanerOptions(
+                keep_bib=False,
                 commands_to_delete="todo x-y",
                 commands_only_to_delete="a*",
                 environments_to_delete="note2 note",

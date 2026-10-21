@@ -12,7 +12,7 @@ def render():
     pdf_upload = st.file_uploader("Upload your camera-ready PDF", type=["pdf"])
     main_hint = arxiv_view.main_file_input()
     paper_type, check_options = acl_view.check_options()
-    options, make_bbl, config = arxiv_view.cleaning_options()
+    options, make_bbl, remove_unused_tex, config = arxiv_view.cleaning_options()
 
     if zip_upload is None or pdf_upload is None:
         missing = " and ".join(
@@ -27,7 +27,7 @@ def render():
 
     pdf_bytes = pdf_upload.getvalue()
     report = acl_view.check(pdf_bytes, paper_type, check_options)
-    result = arxiv_view.clean(zip_upload.getvalue(), main_hint, options, make_bbl, config)
+    result = arxiv_view.clean(zip_upload.getvalue(), main_hint, options, make_bbl, remove_unused_tex, config)
     checks = camera_ready.cross_checks(result, report, acl.first_page_text(pdf_bytes))
 
     arxiv_problems = sum(not ok for ok, _ in arxiv_view.readiness_checks(result))
