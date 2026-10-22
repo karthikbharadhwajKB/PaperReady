@@ -113,6 +113,8 @@ class CleanResult:
     review_version: str = ""
     # The paper's \\title, as plain text ("" if none was found).
     title: str = ""
+    # .tex files removed because the paper neither loads nor mentions them.
+    removed_unused_tex: list = field(default_factory=list)
 
 
 def _encode_back(text):
@@ -342,12 +344,14 @@ def _split_args(raw):
 
 @dataclass
 class CleanerOptions:
-    """Every arxiv_latex_cleaner option the app exposes, with upstream defaults.
+    """Every arxiv_latex_cleaner option the app exposes, with upstream defaults
+    except keep_bib: .bib files are kept (arXiv only runs BibTeX itself when a
+    paper has no .bbl).
 
     Name lists are free text ("todo, \\note"); see build_cleaner_args.
     """
 
-    keep_bib: bool = False
+    keep_bib: bool = True
     resize_images: bool = False
     im_size: int = 500
     compress_pdf: bool = False
@@ -629,8 +633,14 @@ _LOAD_DEPTH = 20
 
 def _paper_text(root, main_tex):
     """The active LaTeX of the paper rooted at `main_tex`, with each file it
-    loads inlined where it is loaded (once), i.e. in the order LaTeX reads it.
-    Files are told apart by their resolved path: "s1/../a.tex" is "a.tex"."""
+    loads inlined where it is loaded (once), i.e. in the order LaTeX reads it."""
+    return _read_paper(root, main_tex)[0]
+
+
+def _read_paper(root, main_tex):
+    """(text, files): the paper's text as in _paper_text, and the resolved paths
+    of the files it is made of. Files are told apart by their resolved path:
+    "s1/../a.tex" is "a.tex"."""
     base = root.resolve()
     seen = set()
     targets = {}  # reference -> resolved file or None, as a paper may load a file many times
@@ -660,7 +670,7 @@ def _paper_text(root, main_tex):
 
         return _LOAD.sub(load, _active_latex(_read_tex(tex)))
 
-    return read(main_tex, 0)
+    return read(main_tex, 0), seen
 
 
 def find_missing_files(root, main_tex, check_bib=True):
@@ -1029,10 +1039,194 @@ def generate_bbl(original_root, cleaned_root, main_name):
     return None, unknown, missing_bibs
 
 
-def clean_zip(zip_bytes, extra_args=None, main_hint=None, config_bytes=None, make_bbl=True):
+# --- Definitions of deleted commands ------------------------------------------------
+
+# arxiv_latex_cleaner deletes or unwraps a command with a regex that also matches
+# the command's own definition: \newcommand\rs[1]{…} looks like a use "\rs[1]{…}",
+# so deleting \rs left a broken "\newcommand%", unwrapping \hl turned
+# \newcommand\hl[1]{\colorbox{yellow}{#1}} into a redefinition of \colorbox, and
+# \def\rs{\textcolor{red}} became "\def%". While the cleaner runs, the
+# definitions of those commands therefore use a placeholder name it doesn't know.
+_DEFINERS = (
+    r"(?:re)?newcommand|providecommand|DeclareRobustCommand|(?:New|Renew|Provide|Declare)DocumentCommand"
+)
+_DEF_PREFIXES = r"(?:\\(?:long|outer|global|protected)\s*)*"
+# Files the cleaner edits, where definitions are renamed (and maybe removed), and
+# the files that may also use a command.
+_CLEANED_SUFFIXES = (".tex", ".tikz")
+_USING_SUFFIXES = (".tex", ".tikz", ".sty", ".cls")
+
+
+def _deleted_commands(extra_args, config):
+    """The plain command names the cleaner deletes or unwraps (from its
+    arguments and an uploaded config)."""
+    names, collecting = [], False
+    for arg in extra_args:
+        if arg.startswith("--"):
+            collecting = arg in ("--commands_to_delete", "--commands_only_to_delete")
+        elif collecting:
+            names.append(arg)
+    for key in ("commands_to_delete", "commands_only_to_delete"):
+        value = (config or {}).get(key) or []
+        names += [value] if isinstance(value, str) else [str(v) for v in value]
+    return sorted({n for n in names if _COMMAND_NAME.fullmatch(n)})
+
+
+def _read_utf8(path):
+    """The file's text, or None if it is not UTF-8 (then it is left alone)."""
+    try:
+        return path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _placeholder(command):
+    """The name a command's definitions have while the cleaner runs."""
+    return f"PaperReadyKeep{command}"
+
+
+def _definition_head(command):
+    """Matches the start of each definition of \\command, up to its name: a
+    \\newcommand-like definer (name in braces or not), or \\def with optional
+    \\long-like prefixes."""
+    name = rf"\\{command}(?![A-Za-z@])"
+    return re.compile(
+        rf"(?P<definer>\\(?P<kind>{_DEFINERS})\*?\s*(?P<brace>\{{)?\s*){name}"
+        rf"|(?P<def>{_DEF_PREFIXES}\\(?:protected@)?[gex]?def\s*){name}"
+    )
+
+
+def _files(root, suffixes):
+    return sorted(p for p in root.rglob("*") if p.suffix in suffixes and p.is_file())
+
+
+def _hide_definitions(root, commands):
+    """Renames the definitions of `commands` in the files the cleaner edits to
+    their placeholder names, so the cleaner only deletes or unwraps the uses.
+    Returns the commands it renamed: one whose placeholder name already occurs
+    in the paper is left alone."""
+    files = {p: t for p in _files(root, _CLEANED_SUFFIXES) if (t := _read_utf8(p)) is not None}
+    commands = [c for c in commands if not any(_placeholder(c) in t for t in files.values())]
+    for path, text in files.items():
+        hidden = text
+        for command in commands:
+            rename = f"\\{_placeholder(command)}"
+            hidden = _definition_head(command).sub(
+                lambda m, rename=rename: (m.group("definer") or m.group("def")) + rename, hidden
+            )
+        if hidden != text:
+            path.write_bytes(hidden.encode("utf-8"))
+    return commands
+
+
+def _definition_spans(text, command):
+    """(start, end) of each definition of \\command in `text`: any prefix, the
+    definer, the name, its options or parameters, and the body (one braced
+    group, two for \\NewDocumentCommand and the like). A definition inside
+    another one is part of that one."""
+    spans = []
+    for m in _definition_head(command).finditer(text):
+        if spans and m.start() < spans[-1][1]:
+            continue
+        pos = m.end()
+        if m.group("definer"):
+            if m.group("brace"):
+                close = re.compile(r"\s*\}").match(text, pos)
+                if not close:
+                    continue
+                pos = close.end()
+            # [number of arguments][default], then the body; \NewDocumentCommand
+            # and the like take an argument spec and a body instead.
+            pos = re.compile(r"(?:\s*\[[^\]]*\])*").match(text, pos).end()
+            groups = 2 if "DocumentCommand" in m.group("kind") else 1
+        else:
+            pos, groups = text.find("{", pos), 1  # \def\rs#1{…}: parameters, then the body
+            if pos < 0:
+                continue
+        for _ in range(groups):
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            if pos >= len(text) or text[pos] != "{":
+                break
+            pos += len(_braced(text, pos)) + 2
+            if pos > len(text) or text[pos - 1] != "}":
+                break  # unbalanced: leave it alone rather than cut the rest of the file
+        else:
+            spans.append((m.start(), pos))
+    return spans
+
+
+def _restore_definitions(root, commands):
+    """After cleaning: removes the (renamed) definitions of `commands` once
+    nothing uses the command any more, the whole line when the definition is
+    alone on it, and gives every other definition its own name back. A command
+    still used anywhere, also in a .sty or .cls file, keeps its definition, so
+    the paper still compiles."""
+    cleaned = {p: t for p in _files(root, _CLEANED_SUFFIXES) if (t := _read_utf8(p)) is not None}
+    others = [_read_tex(p) for p in _files(root, _USING_SUFFIXES) if p.suffix not in _CLEANED_SUFFIXES]
+    for command in commands:
+        placeholder = _placeholder(command)
+        spans = {p: _definition_spans(t, placeholder) for p, t in cleaned.items()}
+        use = re.compile(rf"\\{command}(?![A-Za-z@])")
+        used = any(use.search(t) for t in others) or any(
+            not any(start <= m.start() < end for start, end in spans[p])
+            for p, t in cleaned.items()
+            for m in use.finditer(t)
+        )
+        for path, text in cleaned.items():
+            if not used:
+                for start, end in reversed(spans[path]):
+                    line_start = text.rfind("\n", 0, start) + 1
+                    line_end = text.find("\n", end)
+                    line_end = len(text) if line_end < 0 else line_end + 1
+                    alone = not text[line_start:start].strip() and not text[end:line_end].strip(" \t\r\n%")
+                    text = text[:line_start] + text[line_end:] if alone else text[:start] + text[end:]
+            name = f"\\{command}"
+            cleaned[path] = re.sub(rf"\\{placeholder}(?![A-Za-z@])", lambda _, name=name: name, text)
+    for path, text in cleaned.items():
+        if text != _read_utf8(path):
+            path.write_bytes(text.encode("utf-8"))
+
+
+# --- .tex files the paper doesn't use ---------------------------------------------
+
+
+def _mentioned(path, root, text):
+    """True if `text` names the file: its name, or its path from `root`, with
+    or without the extension."""
+    rel = _rel(path, root)
+    names = {path.stem, path.name, rel, rel[: -len(path.suffix)]}
+    return any(re.search(rf"(?<![\w.-]){re.escape(n)}(?![\w-])", text) for n in names)
+
+
+def _remove_unused_tex(root, main_tex):
+    """Deletes the other complete LaTeX documents under `root` (a
+    \\documentclass and a \\begin{document}) that the paper rooted at `main_tex`
+    neither loads nor mentions, such as the ACL template's acl_lualatex.tex or
+    an old copy of the paper: arXiv could compile one of them instead of the
+    paper. Returns their relative paths. Every other .tex file is kept, as a
+    paper may load it in ways that can't be followed (\\input{sec\\i}), and a
+    document named by a kept file (e.g. \\includestandalone{plot}) is kept too."""
+    _, loaded = _read_paper(root, main_tex)
+    unused = [p for p in _files(root, (".tex",)) if p.resolve() not in loaded and _is_main_candidate(p)]
+    kept = [p for p in _files(root, _USING_SUFFIXES) if p not in unused]
+    text = "\n".join(_active_latex(_read_tex(p)) for p in kept)
+    text += "\n".join(_read_tex(p) for p in root.glob("00README*") if p.is_file())  # arXiv's file list
+    while named := [p for p in unused if _mentioned(p, root, text)]:
+        unused = [p for p in unused if p not in named]
+        text += "\n".join(_active_latex(_read_tex(p)) for p in named)
+    for path in unused:
+        path.unlink()
+    return [_rel(p, root) for p in unused]
+
+
+def clean_zip(
+    zip_bytes, extra_args=None, main_hint=None, config_bytes=None, make_bbl=True, remove_unused_tex=True
+):
     """Cleans an uploaded project. `extra_args` are arxiv_latex_cleaner flags
     (see build_cleaner_args); `config_bytes` is an optional cleaner_config.yaml;
-    `make_bbl` runs BibTeX when the paper needs a .bbl that was not uploaded."""
+    `make_bbl` runs BibTeX when the paper needs a .bbl that was not uploaded;
+    `remove_unused_tex` deletes .tex files the paper neither loads nor mentions."""
     extra_args = list(extra_args or [])
     config = _load_config(config_bytes) if config_bytes else None
     if config is not None:
@@ -1090,8 +1284,8 @@ def clean_zip(zip_bytes, extra_args=None, main_hint=None, config_bytes=None, mak
                 "Rename them to .tex and update the references."
             )
 
-        # .bib files are not checked: arXiv never runs BibTeX, it only needs the
-        # .bbl (warned about below), so a .bib path cannot break the build.
+        # .bib files are not checked: with a .bbl (warned about below) arXiv
+        # never runs BibTeX, so a .bib path cannot break the build.
         missing, uses_bib = find_missing_files(root, main_tex, check_bib=False)
         bbl = main_tex.with_suffix(".bbl")
         missing_bbl = uses_bib and not bbl.is_file()
@@ -1117,6 +1311,8 @@ def clean_zip(zip_bytes, extra_args=None, main_hint=None, config_bytes=None, mak
                         f"{main_tex.name}, so that option had no effect."
                     )
 
+        deleted = _hide_definitions(staged, _deleted_commands(extra_args, config))
+
         cmd = [sys.executable, "-m", "arxiv_latex_cleaner", str(staged), *extra_args]
         if config is not None:
             config_path = Path(tmp) / "cleaner_config.yaml"
@@ -1140,7 +1336,9 @@ def clean_zip(zip_bytes, extra_args=None, main_hint=None, config_bytes=None, mak
                 f"The cleaner did not keep {main_tex.name}; the output would be unusable on arXiv."
             )
 
+        _restore_definitions(cleaned, deleted)
         _restore_encodings(restore_rel, cleaned)
+        removed_tex = _remove_unused_tex(cleaned, cleaned / main_tex.name) if remove_unused_tex else []
 
         # Re-check the cleaned sources: anything they still reference that was
         # uploaded but is absent from the output was dropped by the cleaner.
@@ -1169,8 +1367,8 @@ def clean_zip(zip_bytes, extra_args=None, main_hint=None, config_bytes=None, mak
             else:
                 warnings.append(
                     f"Your paper uses a .bib bibliography but “{bbl.name}” is not "
-                    f"in the zip, and it could not be generated ({problem}). arXiv "
-                    "does not run BibTeX/Biber, so references will show as “?”. "
+                    f"in the zip, and it could not be generated ({problem}). Without "
+                    "it, references may show as “?” on arXiv. "
                     "Compile locally (on Overleaf: Logs and output files → Other "
                     f"logs and files) and add {bbl.name} next to {main_tex.name}."
                 )
@@ -1213,4 +1411,5 @@ def clean_zip(zip_bytes, extra_args=None, main_hint=None, config_bytes=None, mak
             generated_bbl=generated_bbl,
             review_version=review_version,
             title=extract_title(_read_tex(cleaned / main_tex.name), paper),
+            removed_unused_tex=removed_tex,
         )

@@ -40,11 +40,19 @@ def spy_clean_zip(monkeypatch):
     calls = []
     real = cleaner.clean_zip
 
-    def spy(zip_bytes, extra_args=None, main_hint=None, config_bytes=None, make_bbl=True):
+    def spy(
+        zip_bytes, extra_args=None, main_hint=None, config_bytes=None, make_bbl=True, remove_unused_tex=True
+    ):
         calls.append(
-            {"extra_args": extra_args, "main_hint": main_hint, "config": config_bytes, "make_bbl": make_bbl}
+            {
+                "extra_args": extra_args,
+                "main_hint": main_hint,
+                "config": config_bytes,
+                "make_bbl": make_bbl,
+                "remove_unused_tex": remove_unused_tex,
+            }
         )
-        return real(zip_bytes, extra_args, main_hint, config_bytes, make_bbl)
+        return real(zip_bytes, extra_args, main_hint, config_bytes, make_bbl, remove_unused_tex)
 
     monkeypatch.setattr(cleaner, "clean_zip", spy)
     return calls
@@ -82,6 +90,7 @@ CHECKBOXES = [
     "Convert PNG images to JPG",
     "Compress PDF figures (Ghostscript)",
     "Generate a missing .bbl with BibTeX",
+    "Remove other documents your paper doesn't use",
     "Keep .bib files",
     "Use Inkscape-exported SVGs (\\includesvg)",
 ]
@@ -105,13 +114,18 @@ def test_initial_page():
     assert "Drop your project's .zip" in at.info[0].value
 
 
-def test_upstream_defaults():
+def test_defaults():
+    # arxiv_latex_cleaner's own defaults, except that .bib files are kept.
     at = run_app()
     assert widget(at.number_input, "Max image size (pixels, longest side)").value == 500
     assert widget(at.number_input, "PDF image resolution (dpi)").value == 500
     assert widget(at.number_input, "Only convert PNGs larger than (MB)").value == 0.5
     assert at.slider[0].value == 50
-    assert [c.label for c in at.checkbox if c.value] == ["Generate a missing .bbl with BibTeX"]
+    assert [c.label for c in at.checkbox if c.value] == [
+        "Generate a missing .bbl with BibTeX",
+        "Remove other documents your paper doesn't use",
+        "Keep .bib files",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -211,6 +225,7 @@ def test_every_option_is_passed_to_the_cleaner(upload, spy_clean_zip, monkeypatc
         "main_hint": "p2",
         "config": config,
         "make_bbl": False,
+        "remove_unused_tex": True,
     }
     assert any("bad*" in w.value for w in at.warning)
     assert any("comment2" in w.value for w in at.warning)
@@ -308,12 +323,21 @@ def test_results_dashboard_when_ready(upload):
     )
     at = click_clean(run_app())
     files, size, main = at.metric
-    assert (files.label, files.value, files.delta) == ("Files", "2", "-2 files")
+    # main.log is removed; main.tex, main.bbl and refs.bib (kept by default) remain.
+    assert (files.label, files.value, files.delta) == ("Files", "3", "-1 files")
     assert size.label == "Size" and size.delta.startswith("-")
     assert main.label == "main.tex" and "comments & drafts" in main.delta
     assert any("Ready for arXiv!" in m for m in at.markdown.values)
     assert not any("⚠️" in m for m in at.markdown.values)
     assert at.status[0].label.startswith("Cleaned in")
+
+
+@pytest.mark.parametrize("count, shown", [(1, "`draft0.tex`."), (12, "and 2 more.")])
+def test_removed_unused_tex_files_are_listed(upload, count, shown):
+    upload(make_zip({"main.tex": doc(), **{f"draft{i}.tex": doc("old") for i in range(count)}}))
+    at = click_clean(run_app())
+    message = next(i.value for i in at.info if "Removed other documents" in i.value)
+    assert shown in message and "untick" in message
 
 
 def test_results_dashboard_lists_problems(upload):
