@@ -11,8 +11,11 @@ from importlib import metadata
 from urllib.parse import quote_plus, urlencode
 
 REPO_URL = "https://github.com/karthikbharadhwajKB/PaperReady"
-AUTHOR = "Karthik Bharadhwaj"
-AUTHOR_URL = "https://github.com/karthikbharadhwajKB"
+# (name, GitHub profile) of each author, in the order they are credited.
+AUTHORS = [
+    ("Karthik Bharadhwaj", "https://github.com/karthikbharadhwajKB"),
+    ("Rama Krishna Aditya Bharadwaj Kolluri", "https://github.com/Aditya469"),
+]
 
 MODE_NAMES = {
     "arxiv": "Prepare for arXiv",
