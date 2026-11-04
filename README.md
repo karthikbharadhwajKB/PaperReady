@@ -321,9 +321,10 @@ Found a bug, or a paper PaperReady doesn't handle? Please
 - Your files are never attached for you. If you can, attach a small example that
   shows the problem (a cut-down .zip or PDF you're happy to make public).
 
-## Author
+## Authors
 
-Made by **[Karthik Bharadhwaj](https://github.com/karthikbharadhwajKB)** ·
+Made by **[Karthik Bharadhwaj](https://github.com/karthikbharadhwajKB)** and
+**[Rama Krishna Aditya Bharadwaj Kolluri](https://github.com/Aditya469)** ·
 [github.com/karthikbharadhwajKB/PaperReady](https://github.com/karthikbharadhwajKB/PaperReady)
 
 ## License

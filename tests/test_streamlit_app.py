@@ -458,7 +458,10 @@ def test_footer_is_always_shown():
     for at in (run_app(), run_acl_mode()):
         assert any("Nothing is stored" in c for c in at.caption.values)
         credit = next(m for m in at.markdown.values if "Made by" in m)
-        assert "**[Karthik Bharadhwaj](https://github.com/karthikbharadhwajKB)**" in credit
+        assert (
+            "Made by **[Karthik Bharadhwaj](https://github.com/karthikbharadhwajKB)** and "
+            "**[Rama Krishna Aditya Bharadwaj Kolluri](https://github.com/Aditya469)**"
+        ) in credit
         assert "(https://github.com/karthikbharadhwajKB/PaperReady)" in credit
         assert "(https://github.com/karthikbharadhwajKB/PaperReady/issues)" in credit
         assert "[MIT License](https://github.com/karthikbharadhwajKB/PaperReady/blob/main/LICENSE)" in credit
