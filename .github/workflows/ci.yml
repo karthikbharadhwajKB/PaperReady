@@ -56,3 +56,27 @@ jobs:
 
       - name: Run the tests with coverage
         run: uv run pytest -ra --cov --cov-report=term-missing
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build the image
+        run: docker build -t paperready .
+
+      - name: Start it and wait until it is healthy
+        run: |
+          docker run -d --name paperready -p 8501:8501 paperready
+          for i in $(seq 1 60); do
+            if curl -fs http://localhost:8501/_stcore/health; then exit 0; fi
+            sleep 2
+          done
+          docker logs paperready
+          exit 1
+
+      - name: Check the tools the app needs
+        run: |
+          docker exec paperready sh -c 'command -v bibtex && command -v gs'
+          docker exec paperready python -c "import aclpubcheck, arxiv_latex_cleaner, streamlit"

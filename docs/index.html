@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PaperReady</title>
+  <meta name="description" content="Get your LaTeX paper ready to submit: clean it for arXiv, check ACL camera-ready formatting, or both. Free and open source.">
+  <!-- The one place to change when the app moves to another host. -->
+  <meta name="paperready-app" content="https://paperready.streamlit.app">
+  <meta property="og:title" content="PaperReady">
+  <meta property="og:description" content="Clean your LaTeX project for arXiv and check ACL camera-ready formatting. Free and open source.">
+  <meta property="og:image" content="https://karthikbharadhwajkb.github.io/PaperReady/icon-512.png">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --bg: #ffffff;
+      --surface: #f5f5fc;
+      --border: #e0e0f2;
+      --text: #1e1b4b;
+      --muted: #545278;
+      --primary: #4f46e5;
+      --primary-text: #ffffff;
+      --link: #4338ca;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f0e1f;
+        --surface: #191832;
+        --border: #2c2a52;
+        --text: #ecebff;
+        --muted: #a9a7d0;
+        --primary: #6d66f2;
+        --primary-text: #ffffff;
+        --link: #a5a1ff;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    a { color: var(--link); }
+    main, footer { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+    header.hero { text-align: center; padding: 64px 20px 32px; }
+    header.hero img { width: 104px; height: 104px; }
+    h1 { font-size: 2.6rem; margin: 12px 0 4px; letter-spacing: -0.02em; }
+    .tagline { font-size: 1.2rem; color: var(--muted); margin: 0 0 28px; }
+    .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .button {
+      display: inline-block; padding: 12px 22px; border-radius: 12px;
+      font-weight: 600; text-decoration: none; border: 1px solid var(--border);
+    }
+    .button.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+    .button.secondary { color: var(--text); background: var(--surface); }
+    .note { font-size: 0.92rem; color: var(--muted); margin-top: 14px; }
+    .note[hidden] { display: none; }
+    h2 { font-size: 1.5rem; margin: 48px 0 16px; }
+    .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 20px; display: flex; flex-direction: column;
+    }
+    .card h3 { margin: 0 0 6px; font-size: 1.15rem; }
+    .card p { margin: 0 0 14px; color: var(--muted); flex: 1; }
+    .card .upload { font-size: 0.88rem; color: var(--muted); margin-bottom: 14px; }
+    .card a { font-weight: 600; }
+    ul.features { padding-left: 1.2em; }
+    ul.features li { margin-bottom: 8px; }
+    .authors { display: flex; gap: 16px; flex-wrap: wrap; }
+    .author {
+      display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 16px;
+    }
+    .author img { width: 44px; height: 44px; border-radius: 50%; background: var(--border); }
+    .author span { display: block; font-size: 0.88rem; color: var(--muted); }
+    footer { border-top: 1px solid var(--border); margin-top: 56px; padding: 24px 20px 40px; color: var(--muted); font-size: 0.92rem; }
+    @media (max-width: 480px) { h1 { font-size: 2.1rem; } header.hero { padding-top: 40px; } }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <img src="icon.svg" alt="" width="104" height="104">
+    <h1>PaperReady</h1>
+    <p class="tagline">Get your paper ready to submit, for arXiv and ACL venues.</p>
+    <div class="actions">
+      <a class="button primary" data-app-path="/" href="https://paperready.streamlit.app/">Open PaperReady</a>
+      <a class="button secondary" href="https://github.com/karthikbharadhwajKB/PaperReady">Source on GitHub</a>
+    </div>
+    <p class="note">Free and open source. Nothing you upload is stored.</p>
+    <p class="note" id="sleep-note" hidden>If the app shows “This app has gone to sleep”, click
+      <strong>Yes, get this app back up!</strong> and it is ready in about a minute.</p>
+  </header>
+
+  <main>
+    <h2>Three modes</h2>
+    <div class="modes">
+      <div class="card">
+        <h3>🧹 Prepare for arXiv</h3>
+        <p>Strip comments and unused files, add the missing bibliography, and check the result before you upload.</p>
+        <div class="upload">You upload: your LaTeX project (.zip)</div>
+        <a data-app-path="/?mode=arxiv" href="https://paperready.streamlit.app/?mode=arxiv">Clean my paper →</a>
+      </div>
+      <div class="card">
+        <h3>📏 Check ACL format</h3>
+        <p>Check margins, fonts, page limit and references with aclpubcheck, the tool ACL publication chairs use.</p>
+        <div class="upload">You upload: your camera-ready PDF</div>
+        <a data-app-path="/?mode=acl" href="https://paperready.streamlit.app/?mode=acl">Check my PDF →</a>
+      </div>
+      <div class="card">
+        <h3>🎓 ACL camera-ready</h3>
+        <p>Both at once, plus checks that the PDF and the source are the same paper and both the final version.</p>
+        <div class="upload">You upload: the .zip and the PDF</div>
+        <a data-app-path="/?mode=camera" href="https://paperready.streamlit.app/?mode=camera">Check both →</a>
+      </div>
+    </div>
+
+    <h2>What it takes care of</h2>
+    <ul class="features">
+      <li><strong>Any zip:</strong> Overleaf downloads, macOS and Windows zips, nested folders, Latin-1 or UTF-16 files. The main file is found for you.</li>
+      <li><strong>The bibliography:</strong> Overleaf's download has no <code>.bbl</code>; PaperReady runs BibTeX with your own <code>.bib</code> and <code>.bst</code> and adds it.</li>
+      <li><strong>Review comments:</strong> delete or unwrap commands like <code>\todo</code> or your own <code>\newcommand\rs[1]{…}</code>; their definitions go too, and everything else stays.</li>
+      <li><strong>Checks before you submit:</strong> missing and dropped files, the anonymous review version still switched on, stray documents arXiv could compile instead, and arXiv's 50 MB limit.</li>
+      <li><strong>Faithful cleaning:</strong> the cleaning itself is Google's <a href="https://github.com/google-research/arxiv-latex-cleaner">arxiv_latex_cleaner</a>; PaperReady prepares the input and checks the output.</li>
+    </ul>
+    <p>Tested on the official ACL, ICLR and CVPR templates and on the sources of published arXiv papers: the cleaned projects build to the same paper as the originals.</p>
+
+    <h2>Authors</h2>
+    <div class="authors">
+      <a class="author" href="https://github.com/karthikbharadhwajKB">
+        <img src="https://github.com/karthikbharadhwajKB.png?size=88" alt="" width="44" height="44" loading="lazy">
+        <div>Karthik Bharadhwaj<span>@karthikbharadhwajKB</span></div>
+      </a>
+      <a class="author" href="https://github.com/Aditya469">
+        <img src="https://github.com/Aditya469.png?size=88" alt="" width="44" height="44" loading="lazy">
+        <div>Rama Krishna Aditya Bharadwaj Kolluri<span>@Aditya469</span></div>
+      </a>
+    </div>
+  </main>
+
+  <footer>
+    <p>PaperReady is released under the <a href="https://github.com/karthikbharadhwajKB/PaperReady/blob/main/LICENSE">MIT License</a>.
+      It runs <a href="https://github.com/google-research/arxiv-latex-cleaner">arxiv_latex_cleaner</a> (Apache 2.0)
+      and <a href="https://github.com/acl-org/aclpubcheck">aclpubcheck</a> (MIT).
+      Found a problem? <a href="https://github.com/karthikbharadhwajKB/PaperReady/issues/new/choose">Report it on GitHub</a>.</p>
+  </footer>
+
+  <script>
+    // Point every app link at the host named in <meta name="paperready-app">.
+    const app = document.querySelector('meta[name="paperready-app"]').content.replace(/\/$/, "");
+    for (const link of document.querySelectorAll("[data-app-path]")) {
+      link.href = app + link.dataset.appPath;
+    }
+    // Streamlit Community Cloud puts idle apps to sleep; say how to wake it.
+    document.getElementById("sleep-note").hidden = !app.includes("streamlit.app");
+  </script>
+</body>
+</html>
