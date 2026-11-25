@@ -254,13 +254,37 @@ pull request:
 - **No skipped tests:** `PAPERREADY_REQUIRE_ALL_TESTS=1` turns any skipped test
   into a failure.
 - **Coverage:** below 95% fails the build.
+- **Docker image:** built, started and checked for a healthy app with BibTeX
+  and Ghostscript.
 
 New code needs tests to pass CI.
 
-## Deploy it live (free)
+## Deploy it live
 
-The app runs on **Streamlit Community Cloud**, which hosts it from this GitHub
-repo and redeploys on every push to `main`:
+The project page at <https://karthikbharadhwajkb.github.io/PaperReady/> is
+served by GitHub Pages from the `docs/` folder. Its app links all point at
+the host named in one tag, `<meta name="paperready-app">` in `docs/index.html`.
+
+### With Docker (any host)
+
+The `Dockerfile` builds the whole app: the system packages from
+`packages.txt` (BibTeX, Ghostscript) and the Python versions pinned in
+`uv.lock`. It listens on `$PORT` (default 8501) and has a health check at
+`/_stcore/health`. CI builds and starts it on every push.
+
+```bash
+docker build -t paperready .
+docker run -p 8501:8501 paperready
+```
+
+On a host that builds from GitHub (e.g. Northflank, Google Cloud Run), create a
+service from this repository with the `Dockerfile`, expose port 8501 over
+HTTP, and enable deploy on push to `main`. About 1 GB of memory is plenty.
+
+### On Streamlit Community Cloud (free)
+
+Streamlit Community Cloud hosts the app from this GitHub repo and redeploys
+on every push to `main`. Apps there sleep after 12 hours without visitors:
 
 1. Go to <https://share.streamlit.io> and sign in with GitHub.
 2. **Create app** → pick this repo → set the main file to `streamlit_app.py`.
@@ -304,8 +328,10 @@ assets/                      icons: PaperReady (icon.svg + PNGs), arXiv (arxiv.s
 requirements.txt             Python dependencies for Streamlit Community Cloud
 packages.txt                 system packages for Streamlit Community Cloud (Ghostscript, BibTeX)
 pyproject.toml               dependencies for local development with uv
+Dockerfile                   the app as a container image, for Docker hosts
+docs/                        the project page on GitHub Pages
 tests/                       pytest suite (uv run pytest)
-.github/workflows/ci.yml     CI: lint and tests on every push and pull request
+.github/workflows/ci.yml     CI: lint, tests and the Docker image on every push and pull request
 .github/ISSUE_TEMPLATE/      the “Report a problem” and “Suggest a feature” forms
 ```
 
